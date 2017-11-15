@@ -1,0 +1,282 @@
+---
+title: "Untitled"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## GitHub Documents
+
+This is an R Markdown format used for publishing markdown documents to GitHub. When you click the **Knit** button all R code chunks are run and a markdown file (.md) suitable for publishing to GitHub is generated.
+
+## Including Code
+
+You can include R code in the document as follows:
+
+```{r cars}
+installed_packages <- installed.packages()[,1]
+isDplyrInstalled <- "dplyr" %in% installed_packages
+isGgplotInstalled <- "ggplot2" %in% installed_packages
+isReshape2Installed <- "reshape2" %in% install.packages
+
+if(!isDplyrInstalled) {
+  install.packages("dplyr")
+}
+
+if(!isGgplotInstalled) {
+  install.packages("ggplot2")
+}
+
+if(!isReshape2Installed) {
+  install.packages("reshape2")
+}
+
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+
+#Import uber data
+uber_data <- read.csv("Uber Request Data.csv")
+
+View(uber_data)
+
+str(uber_data)
+
+summary(uber_data)
+
+#Make a copy of uber data
+master_uberdata <-  uber_data
+
+#Conversion of time format $d/$m/$Y %H:%M 
+master_uberdata$ReqtimeFormatted <- as.POSIXct(master_uberdata$Request.timestamp, format="%d/%m/%Y %H:%M")
+
+#Conversion of time format $d-$m-$Y %H:%M:%S
+master_uberdata$Request.timestamp <- as.POSIXct(master_uberdata$Request.timestamp, format="%d-%m-%Y %H:%M:%S")
+
+#Verify if there are any missing values. If the below expression is true then there are none of the req time is missed.
+length(which(is.na(master_uberdata$Request.timestamp))) == length(which(!is.na(master_uberdata$ReqtimeFormatted)))
+
+#Conversion of time format $d/$m/$Y %H:%M
+master_uberdata$DroptimeFormatted <- as.POSIXct(master_uberdata$Drop.timestamp, format="%d/%m/%Y %H:%M")
+
+#Conversion of time format $d-$m-$Y %H:%M:%S
+master_uberdata$Drop.timestamp <- as.POSIXct(master_uberdata$Drop.timestamp, format="%d-%m-%Y %H:%M:%S")
+
+#Verify if there are any missing values. If the below expression is true then there are none of the Drop time is missed.
+length(which(is.na(master_uberdata$Drop.timestamp) & master_uberdata$Status == "Trip Completed")) == length(which(!is.na(master_uberdata$DroptimeFormatted) & master_uberdata$Status == "Trip Completed"))
+
+#Merge fromated req time coulmns and drop time columns 
+master_uberdata <- mutate(master_uberdata, Requesttime = as.POSIXct(ifelse(is.na(Request.timestamp),ReqtimeFormatted,Request.timestamp), origin = "1970-01-01"))
+
+master_uberdata <- mutate(master_uberdata, Droptime = as.POSIXct(ifelse(is.na(Drop.timestamp),DroptimeFormatted,Drop.timestamp), origin = "1970-01-01"))
+
+
+#Remove unwnated rows
+master_uberdata <- master_uberdata[c(1,2,3,4,9,10)]
+
+#Genereate Weekdays derived variable
+master_uberdata$Weekdays <- factor(weekdays(master_uberdata$Requesttime), levels = c("Monday","Tuesday","Wednesday","Thursday","Friday"))
+
+#Genereate Travel time derived variable
+master_uberdata$Traveltime <- (master_uberdata$Droptime - master_uberdata$Requesttime)
+master_uberdata$Traveltime <-round(as.numeric(master_uberdata$Traveltime), digits=0)
+
+#Genereate Hour derived variable
+master_uberdata$Hour <- as.numeric(format(master_uberdata$Requesttime, "%H"))
+
+#Calculate request cancelled, success and no cars available
+master_uberdata <- group_by(master_uberdata,Status)
+Status_summary <- summarise(master_uberdata, Request_Count = length(Request.id))
+#Group by weekday and status
+master_uberdata <- group_by(master_uberdata, Weekdays, Status)
+weekday_Status_summary <- summarise(master_uberdata, BookingStatus = length(Weekdays))
+```
+```{r pressure, echo=FALSE}
+#plot the Bookings w.r.t hours
+ggplot(master_uberdata, aes(x=Hour, fill=Status)) + geom_bar(position = "dodge") + 
+  labs(title="Hour vs Request Count(All the Weekdays together)", y="Request Count", X= "Hours")
+
+#Plot the Bookings w.r.t each day along with the Status fo the booking
+ggplot(master_uberdata, aes(x=Weekdays, fill=Status)) + geom_bar(position = "dodge") + 
+  labs(title = "Weekdays vs Request", y="No of Request")
+```
+
+```{r cars}
+#Generate a column with Timslot containin evening, morning, Noon, Night, Midnight, Early morning
+CalculatetimeSlot <- function(hour){
+                      if( 3 < hour & hour <=  7)
+                      {
+                        return("Early Morning")
+                      }
+                      if( 7 < hour & hour <= 11 )  
+                      {
+                        return("Morning")
+                      }  
+                      if(11 < hour & hour <= 15 )  
+                      {
+                        return("Noon")
+                      } 
+                      if( 15 < hour & hour <= 19 )  
+                      {
+                        return("Evening")
+                      }
+                      if( 19 < hour & hour <= 23 )  
+                      {
+                          return("Night")
+                      }
+                      if(hour > 23  | hour <= 3)  
+                      {
+                          return("Midnight")
+                      }
+                      return("Other")
+                  }
+master_uberdata$TimeSlot <- c(NA)
+for(i in 1:nrow(master_uberdata))
+{    
+  master_uberdata$TimeSlot[i] <- CalculatetimeSlot(master_uberdata$Hour[i])
+}
+master_uberdata$TimeSlot <- factor(master_uberdata$TimeSlot, levels=c("Early Morning","Morning","Noon","Evening","Night","Midnight"))
+
+#including timeslot in gorup by
+master_uberdata <- group_by(master_uberdata, Weekdays, TimeSlot, Status)
+time_summarry <- summarise(master_uberdata, No_of_request = length(Weekdays))
+```
+```{r pressure, echo=FALSE}
+#Plot graph with Status, Timslot, Weekdays, No of Request
+
+ggplot(time_summarry, aes(x=TimeSlot, y=No_of_request, fill=Status)) + geom_col(position="dodge") + 
+     facet_grid(.~Weekdays) + labs(title = "Weekdays, Timeslot vs Request", y="No of Request") +
+     theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+ggplot(time_summarry, aes(x=TimeSlot, y=No_of_request, fill=Status)) + geom_col(position="dodge") + 
+  labs(title = "Timeslot vs Request", y="No of Request") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+#From the graph we could find that the no cars available and cancelled is high during evening and early morning respectively
+```
+
+```{r cars}
+#Filtering the uber data with no car available and evening timezone
+evening_nocars <- filter(master_uberdata, TimeSlot == "Evening", Status == "No Cars Available")
+evening_nocars <- group_by(evening_nocars, Pickup.point, Weekdays)
+nocarsreq_weekday <- summarise(evening_nocars, No_Of_Request = length(Weekdays))
+nocarsreq_weekday$Weekdays <- factor(nocarsreq_weekday$Weekdays, levels = c("Monday","Tuesday","Wednesday","Thursday","Friday"))
+```
+```{r pressure, echo=FALSE}
+#Plot Cars not available req vs pickup point by weekday
+ggplot(nocarsreq_weekday, aes(x=Pickup.point, y=No_Of_Request, fill=Weekdays)) + geom_col(position="dodge") + 
+  geom_text(aes(label=No_Of_Request), vjust = 1, position = position_dodge(width=1)) +
+  labs(title = "Pickup point vs No of Request (Cars not available during Evening by Day)", y="No of Request")
+
+#Plot Cars not available vs pickup point by Hour
+evening_nocars <- group_by(evening_nocars, Pickup.point, Hour)
+nocarsreq_Hour <- summarise(evening_nocars, No_Of_Request = length(Hour))
+ggplot(nocarsreq_Hour, aes(x=Pickup.point, y=No_Of_Request, fill=as.factor(Hour))) + geom_col(position="dodge") + 
+  geom_text(aes(label=No_Of_Request), vjust = 1, position = position_dodge(width=1)) +
+  labs(title = "Pickup point vs No of Request (Cars not available during evening by Hour)", y="No of Request")
+```
+#Filtering the uber data with cancelled and early morning
+earlymrng_cancelled <- filter(master_uberdata, TimeSlot == "Early Morning", Status == "Cancelled")
+earlymrng_cancelled <- group_by(earlymrng_cancelled, Pickup.point, Weekdays)
+cancelreq_weekday <- summarise(earlymrng_cancelled, No_Of_Request = length(Weekdays))
+
+#Plot cancel req vs pickup point by weekday
+ggplot(cancelreq_weekday, aes(x=Pickup.point, y=No_Of_Request, fill=Weekdays)) + geom_col(position="dodge") + 
+  geom_text(aes(label=No_Of_Request), vjust = 1, position = position_dodge(width=1)) +
+  labs(title = "Pickup point vs No of Request (Cancelled During Early morning by Day)", y="No of Request")
+
+#Plot cancel req vs pickup point by Hour
+earlymrng_cancelled <- group_by(earlymrng_cancelled, Pickup.point, Hour)
+cancelreq_Hour <- summarise(earlymrng_cancelled, No_Of_Request = length(Hour))
+ggplot(cancelreq_Hour, aes(x=Pickup.point, y=No_Of_Request, fill=as.factor(Hour))) + geom_col(position="dodge") + 
+  geom_text(aes(label=No_Of_Request), vjust = 1, position = position_dodge(width=1)) +
+  labs(title = "Pickup point vs No of Request (Cancelled During Early morning by Hour)", y="No of Request")
+
+#Calculating supply demand gap  Count of cancelled and no cars available tips - count of tips completed
+airport_req <- filter(master_uberdata, Pickup.point == "Airport")
+airport_req <- group_by(airport_req, TimeSlot)
+airport_supply_demand_gap <- summarise(airport_req, Demand = length(which(!is.na(Request.id))), Supply = length(which(Status=="Trip Completed")), 
+                               Supply_Demand_Gap = (length(which(!is.na(Status))) - length(which(Status=="Trip Completed"))))
+
+air_gap_melt <- melt(airport_supply_demand_gap, id.vars='TimeSlot')
+
+#Plot graph for supply  and demand for pickup points air
+ggplot(air_gap_melt, aes(x=TimeSlot, y=value, fill=variable)) + geom_bar(stat='identity', position='dodge') +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  labs(title = "Supply Demand Gap for pickup points with Airport", y="Request")
+
+
+#Calculating supply demand gap  Count of cancelled and no cars available tips - count of tips completed
+city_req <- filter(master_uberdata, Pickup.point == "City")
+city_req <- group_by(city_req, TimeSlot)
+city_supply_demand_gap <- summarise(city_req, Demand = length(which(!is.na(Request.id))), Supply = length(which(Status=="Trip Completed")), 
+                                       Supply_Demand_Gap = (length(which(!is.na(Status))) - length(which(Status=="Trip Completed"))))
+
+city_gap_melt <- melt(city_supply_demand_gap, id.vars='TimeSlot')
+
+#Plot graph for supply  and demand for pickup points air
+ggplot(city_gap_melt, aes(x=TimeSlot, y=value, fill=variable)) + geom_bar(stat='identity', position='dodge') +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  labs(title = "Supply Demand Gap for pickup points with City", y="Request")
+
+#Analyse why there are cancel and cars not available
+
+#Filter success trips details
+success_trips <- filter(master_uberdata, !is.na(Traveltime))
+
+#Plot graph for Traveltime
+success_trips_airport <- filter(master_uberdata, Pickup.point == "Airport")
+ggplot(success_trips_airport, aes(x=TimeSlot, y=Traveltime)) + geom_boxplot(notch = TRUE, aes(colour = TimeSlot)) + 
+  labs(title="Traveltime") + geom_jitter(aes(colour=TimeSlot, shape = TimeSlot))
+
+#calculate median and quartile for travel time duirng evening slot
+success_trips_airport_evening <- filter(success_trips_airport, TimeSlot == "Evening")
+summary(success_trips_airport_evening)
+
+#Filter the round trips
+success_trips <- arrange(success_trips,Driver.id,Requesttime, Droptime)
+roundtrip_index <- c()
+for(i in 1:nrow(success_trips))
+{
+   if(i == nrow(success_trips))
+   {
+     next
+   }   
+   if((success_trips$Pickup.point[i] != success_trips$Pickup.point[i+1]) & (success_trips$Driver.id[i] == success_trips$Driver.id[i+1]))
+   {
+     roundtrip_index[length(roundtrip_index) + 1] <- i
+   }
+}
+
+round_trips <- success_trips[roundtrip_index,]
+
+#Calculate Idle time
+round_trips$idleTime <- c(NA)
+for(i in 1:nrow(round_trips))
+{
+  if(i == nrow(round_trips))
+  {
+    next
+  } 
+  if(round_trips$Driver.id[i] == round_trips$Driver.id[i+1])
+    round_trips$idleTime[i] <- round_trips$Requesttime[i+1] - round_trips$Droptime[i] 
+}
+
+
+#Considering only the idle time in airport
+round_trips_city <-  filter(round_trips, Pickup.point == "City")
+round_trips_city$idleTime <- round(round_trips$idleTime,0)
+
+#Plotting the idle time
+ggplot(round_trips_city,aes(x=TimeSlot, y=idleTime)) + geom_boxplot(notch = TRUE, aes(colour = TimeSlot)) + 
+  labs(title="Idle Time") + geom_jitter(aes(colour=TimeSlot, shape = TimeSlot))
+
+#calculate median and quartile for idle time duirng early morning slot
+round_trips_city_morning <- filter(round_trips_city, TimeSlot == "Early Morning")
+summary(round_trips_city_morning)
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
